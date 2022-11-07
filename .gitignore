@@ -3,9 +3,9 @@ README.md
 gradlew
 gradlew.bat
 build/
-!gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
+gradle/wrapper/**
 
 ### STS ###
 .apt_generated
