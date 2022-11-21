@@ -64,6 +64,7 @@ class: center, middle
 <p align="center">
   <img src="../static/img/java-memory-model.png" alt="jvm" width="600"/>
 </p>
+
 ---
 # Garbage Collection (GC)
 1. **Marking**: Identifies which objects are in use and not in use
@@ -90,14 +91,14 @@ class: center, middle
 <p align="center">
   <img src="../static/img/g1gc-heap.png" alt="g1gc" width="400"/>
 </p>
-
 - Principle: Having as close to 2048 regions as possible where each region is sized as a power of 2 between 1 and 64 MB
       - Can also specify by `-XX:G1HeapRegionSize`
 
 ???
-The allocation and consumption of space is both non-contiguous and free to evolve as it gains a better understanding of the most efficient young to old ratio.
-When the region has been exhausted of space, a new region is selected, allocated and filled. This continues until the cumulative Eden region space has been filled, triggering an evacuation pause (also known as a young collection / young gc / young pause or mixed collection / mixed gc / mixed pause).
-
+- The allocation and consumption of space is both non-contiguous and free to evolve as it gains a better understanding of the most efficient young to old ratio.
+- When the region has been exhausted of space, a new region is selected, allocated and filled. This continues until the cumulative Eden region space has been filled, triggering an evacuation pause (also known as a young collection / young gc / young pause or mixed collection / mixed gc / mixed pause).
+- G1GC favours bigger heap because:
+  - During young GC, G1GC will collect all live objects and copy to survivor/old gen regions and for this copying to happen there should be enough free regions to accommodate aged objects coming from eden regions and if there is less space, it wont have space to stay and compact
 <!-- ---
 | Collection Type | Details | Principle | Goal |
 | --- | --- | ---| ---|
@@ -195,6 +196,18 @@ class: center, middle
  -->
 
 # Extra
+## Java heap memory switches
+
+| VM Switch | VM Switch Description             |
+|-----------|-----------------------------------|
+| `-Xms`      | Initial heap size when JVM starts |
+| `-Xmx` | Maximum heap size                 |
+| `-Xmn`| Size of young generation, rest to Old Generation |
+| `-XX:PermGen` | Initial size of Perm Gen memory |
+| `-XX:MaxPermGen` | Maximum Perm Gen size |
+| `-XX:SurvivorRatio`| Ratio of eden space and survivor space <br/> (Defaults to 8, i.e. 80% is eden space and 10% for each survivor space) |
+| `-XX:NewRatio`| Ratio of old and new generation sizes <br/> (Defaults to 2) |
+---
 ## Metrics to monitor
 (list the important metrics)
 - How often GC is happening in the JVM
