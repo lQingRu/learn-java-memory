@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Title</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Sharing on KM's Nightly Indexing Performance
+---
+# Agenda
+
+1. TLDR of KM's Nightly Indexing
+
+2. What is the problem?
+
+3. Quick 101 to Java Memory Model
+
+4. Quick 101 to Java Garbage Collection
+
+5. Attempts made and their results
+
+6. Deeper dive into codes
+
+7. Challenges
+
+8. General Principles
+---
+# KM's Nightly Indexing
+## When does it run?
+- Spring scheduled task at 1am daily, usually would take 4 hours
+
+## What is being indexed?
+- Profile
+- Sel
+- TE
+- Post
+- All (Searchable fields, Attachments)
+---
+# The Problem
+## Timeline
+(insert table)
+
+(add elaboration on how did it surface)
+ - failed indexing on grafana > pod died > OOM error > prometheus JVM memory usage exceeded memory limit
+ - as a temporary solution, increased memory to 20Gi
+---
+# Java Memory Model
+<p align="center">
+  <img src="../static/img/java-memory-model.png" alt="jvm" width="600"/>
+</p>
+---
+# Garbage Collection (GC)
+1. **Marking**: Identifies which objects are in use and not in use
+2. **Normal deletion**: GC removes unused objects and reclaim the free space
+3. **Deletion with compacting**: After deletion, all the survived objects can be moved to be together
+
+## When does GC occur?
+- Either collected or old enough for promotion, defined by </br> `-XX:MaxTenuringThreshold` (defaults to 15)
+- Objects that cannot be reached via the GC roots = Unreachable = Removed during GC
+
+???
+`-XX:MaxTenuringThreshold` specifies for how many minor GC cycles an object will stay in the survivor spaces until it finally gets tenured into the old space
+
+### 4 kinds of GC roots
+1. Local variables
+2. Active java threads (?)
+3. Static variables and constants
+4. JNI references
+---
+# Garbage-first (G1) Garbage Collector
+- By default from Java 9 onwards, G1GC is used
+- Goal: To achieve predictable soft-target pause time while being consistent with throughput, defined by `-XX:MaxGCPauseMillis` (defaults to 200ms)
+
+<p align="center">
+  <img src="../static/img/g1gc-heap.png" alt="g1gc" width="400"/>
+</p>
+
+- Principle: Having as close to 2048 regions as possible where each region is sized as a power of 2 between 1 and 64 MB
+      - Can also specify by `-XX:G1HeapRegionSize`
+
+???
+The allocation and consumption of space is both non-contiguous and free to evolve as it gains a better understanding of the most efficient young to old ratio.
+When the region has been exhausted of space, a new region is selected, allocated and filled. This continues until the cumulative Eden region space has been filled, triggering an evacuation pause (also known as a young collection / young gc / young pause or mixed collection / mixed gc / mixed pause).
+
+<!-- ---
+| Collection Type | Details | Principle | Goal |
+| --- | --- | ---| ---|
+| Young collection | - Dead objects collected <br/> - Any remaining live objects are evacuated and compacted into survivor space | Hard margin, `G1ReservePercent`(defaults to 10%)always available for survivor space during evacuation| All allocated eden spaces are freed up |
+
+???
+In G1, concurrent marking is based on the principle of snapshot-at-the-beginning (SATB). This means, for efficiency purposes, it can only identify objects as being garbage if they existed when the initial snapshot was taken. Any newly allocated objects that appear during the concurrent marking cycle are considered to be live irrespective of their true state. This is important because the longer it takes for concurrent marking to complete, the higher the ratio will be of what is collectible versus what is considered to be implicitly live. -->
+---
+# Attempts made
+(insert gitlab issue)
+
+## 1. Prevent long-lived objects
+- What
+  - Modularised indexing 
+- Rationale
+- Results
+- What it means
+---
+# Attempts made
+## 2. Reduce size of "long-lived" objects
+- What
+  - Reduce profile batch size from 25k to 10k
+- Rationale
+- Results
+- What it means
+
+---
+class: center, middle
+
+# Closer look into the memory usage graph...
+---
+# Prometheus JVM Heap Usage
+(insert graph and analysis)
+
+- Some key points:
+  - Rather constant increase in old generation
+  - No relation between young and old generation usage
+  - Old generation memory usage is the bottleneck
+---
+# Humongous Objects
+- Humongous objects are objects that **occupy > 50% of region size**
+<p align="center">
+  <img src="../static/img/g1gc-heap-2.png" alt="g1gc" width="450"/>
+</p>
+<p align="center">
+  <code>
+    Region Size: 4096 KB <br/>
+    Object Size: 12800 KB > 50% of 4096 KB<br/>
+    Result: Humongous Allocation across 4 regions = 16MB
+  </code>
+</p>
+- They are **directly allocated** in a special humongous regions which are **free, contiguous regions that are part of the Old Generation**
+- <span style="color: red">They could only be collected through a Full GC</span> 
+
+???
+- Humongous allocation represents a single object, and as such, must be allocated into contiguous space. This can lead to significant fragmentation.
+- Directly into old gen because the cost to evacuate and copy such an object across the young generations can be too high.  
+- Humongous allocations always trigger a concurrent marking cycle, whether the IHOP criteria is met or not.
+---
+<!-- # General troubleshooting 
+## OOM but very little GC 
+- Possibly a memory leak
+## High Old Gen but  -->
+
+# Challenges
+(insert gitlab issue)
+## Monitoring
+- Memory profiling is currently expensive
+  - Not suitable for production
+- Alternative technique is to snapshot heap (static analysis)
+  - Memory intensive
+  
+
+## Load 
+---
+# GC Tuning
+## Major issues
+1. ‘to-space exhausted’ event: Heap can no longer be expanded and there are no available regions  => Evacuation failure 
+2. Full GC event: Very costly Stop-the-world event
+
+- Factors to study and measure during a tuning exercise:
+    - Allocation
+    - Pause sensitivity
+    - Throughput behaviour
+        <!-- - Throughput can be affected by a number of factors, such as the fact that concurrent collectors take up cores when they’re running. -->
+    - Object lifetime
+
+    ## There is no definitive guide
+    Tuning is a constantly evolving process where we establish a set of baselines and optimal settings through repetitive testing, making incremental changes and re-evaluating until we reach our goals
+---
+<!-- ## G1 Garbage Collector
+- The higher the soft-target pause time = achieveable throughput & higher latency
+### Heap size
+- Heap-to-size ratio will create because the fewer the regions, the less flexibility G1 has and the longer it takes to scan, mark and collect each of them
+ -->
+
+# Extra
+## Metrics to monitor
+(list the important metrics)
+- How often GC is happening in the JVM
+- How much memory is being collected each time
+- Percentage of time spent by JVM for garbage collection
+- What type of garbage collection happened - minor or full GC?
+- JVM heap and non-heap memory usage
+- CPU utilization of the JVM
+
+## Tools to monitor memory usage
+- GC logging
+- Memory profilers
+  - CLI: `jcmd`, `jmap`, `jstat`
+  - GUI: `jConsole`, `VisualVM`, Mission Control
+- Heap dumps
+### Flame graph
+- Visualizes distributed request trace and represents each service call that occurred during the request’s execution path 
+  - Include error and latency data to help identify and fix bottlenecks in applications
+- Can also visualize code profiling data.
+  - A code profiler analyzes how much time the application code spent on GC, CPU utilization, memory allocation, locks, input/output operations, and other tasks
+
+---
+# Extra
+### Average heap usage after each garbage collection
+- If the baseline heap usage is consistently increasing after each garbage collection, it may
+  indicate:
+    - Application's memory requirements are growing
+    - Memory leak 
+
+### Old generation size
+- It should stay flat under normal circumstances
+- If there is an unexpected increase in this metric, it could signal:
+    - Java application is creating long-lived objects
+    - Creating more humongous objects 
+---
+# Out of Memory errors
+- Heap occupancy grows => GC frequency and pause times grow 
+    - When all of tthe java heap is consumed JVM will terminate and throw OOM
+- JVM throws an OOM error under these circumstances:
+    - No native memory available for the JVM
+    - Metaspace is out of memory
+    - Java heap itself is out of memory: app has too many live objects for the given heap size
+    - JVM is spending too much time performing GC
+
+---
+## General principles - Use less memory
+Using memory more efficiently: use less heap memory → fewer GC cycles
+
+### Reduce Object Size
+- Grey area: object fields that hold the result of a calculation based on pieces of data
+    - Should it be better to store the value → memory
+    - Spend time to calculate the value as needed → CPU cycles
+---
+## General principles - Use less memory
+
+### Lazy Initialization
+- Best used when the operation is infrequently used
+
+### Eager deinitialization
+- Allows the object to be collected more quickly by the GC
+
+### Flyweight pattern
+(??)
+
+---
+# Good resources
+- [Red Hat Part 1: Introduction to the G1 Garbage Collector](https://www.redhat.com/en/blog/part-1-introduction-g1-garbage-collector)
+- [Red Hat Part 2: G1GC Logs Analysis](https://www.redhat.com/en/blog/collecting-and-reading-g1-garbage-collector-logs-part-2)
+- [Java SE 17 standard options for java](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html#standard-options-for-java)
+
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
