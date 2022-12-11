@@ -107,6 +107,7 @@
         - As long as the application can reach these objects via the GC roots, they are considered
           reachable and will not be garbage collected
         - GC roots are always reachable (referenced by the JVM)
+          - Simplified: a local variable of reference type that will always point to an object in the heap (provided it is not null)
 - 4 kinds of GC roots:
     - Local variables
         - Kept alive by thread stack
@@ -137,7 +138,6 @@
 - Application logs
     - `-Xloggc:/tmp/gc.log`: information about GC at each collection
     - `-XX:HeapDumpPath=/tmp/my-heap-dump.hprof`: heap dump
--
 
 See [Oracle Throughput and Footprint Measurement](https://docs.oracle.com/en/java/javase/18/gctuning/garbage-collector-implementation.html#GUID-A24775AB-16A3-4B86-9963-76E5AC398A3E)
 
@@ -194,5 +194,65 @@ See [Oracle Java 8 OOM Exception](https://docs.oracle.com/javase/8/docs/technote
 - [Java Memory Management ](https://www.datadoghq.com/blog/java-memory-management/#jvm-runtime-metrics)
 - [How does Garbage Collection work](https://www.alibabacloud.com/blog/595387)
 - [Java SE 17 standard options for java](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html#standard-options-for-java)
+- [How to read GC activity logs](https://www.linkedin.com/pulse/javajvm-logsgc-logsg1gc-monday-jvm-logs-g1gc-phases-ślusarski/)
 
 
+# TODO
+https://trello.com/c/PG9SVsf2/158-java-memory-sharing-4-hours
+## Immediate
+### Reasoning
+- [X] How to deal with humongous objects?
+    - "In-order to reduce copying overhead, the Humongous objects are not included in any evacuation pause. A full garbage collection cycle compacts Humongous objects in place." - [source](https://www.oracle.com/technical-resources/articles/java/g1gc.html)
+    - [ ] Flyweight 
+    - "Humongous objects need contiguous space -> thus need help to prevent because may exit if cannot find enough contiguous space"
+    - Mine: Some people recommend to increase the region size so that objects do not automatically fall under humongous objects
+    - https://devblogs.microsoft.com/java/whats-the-deal-with-humongous-objects-in-java/ 
+
+### Monitoring
+- [ ] WRITE: What are the tools that I have used to help troubleshoot memory issues?
+- [?] How the prometheus metrics could have helped
+    - `jvm_gc_seconds.max`
+        - `minorGC`
+        - `G1 Evacuation Phase`
+        - `G1 Humongous Allocation`
+
+
+## Less Immediate
+
+### Learning
+- [ ] Learning
+   - Indexing
+   - Memory management
+   - Monitoring
+      - Pros
+      - Cons
+      - Industrial examples
+   - Debug tools
+
+### Extra
+- [ ] Typical causes of high memory usage
+- [ ] How to identify memory leak
+- [ ] After thoughts
+- [ ] Size of objects
+
+### Understand
+- [ ] Flame graph 
+- [ ] async-profiler vs java profiler recorder
+
+# Extra useful information
+## Taming the mixed collections
+- Affected flags:
+  - `-XX:InitiatingHeapOccupancyPercent`
+    - For changing marking threshold
+  - `-XX:G1MixedGCLiveThresholdPercent` and `-XX:G1HeapWastePercent`
+    - To change mixed garbage collections decisions
+  - `-XX:G1MixedGCCountTarget` and `-XX:G1OldCSetRegionThresholdPercent`
+    - When want to adjust CSet for old regions (C set is collection set - i.e. a set of regions that should be collected in the next cycle)
+  - `XX:G1MixedGCLiveThresholdPercent`
+    - For changing the threshold which determines whether a region should be added to the CSet or not
+      - Only regions whose live data percentage are less than the threshold will be added to the CSet
+    - The higher the threshold, the more likely a region will be added to the CSet, i.e. more mixed GC evacuation and longer evacuation time will happen
+    - Old regions with most garbage is chose for
+  - `-XX:G1HeapWastePercent`
+    - Amount of reclaimable space, expressed as a % of the heap size that G1 will stop doing mixed GC's
+    - If the amount of space that can be reclaimed from old generation regions compared to the total heap is less than this, G1 will stop mixed GCs
