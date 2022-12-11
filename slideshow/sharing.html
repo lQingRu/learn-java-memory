@@ -17,21 +17,19 @@ class: center, middle
 ---
 # Agenda
 
-1. TLDR of KM's Nightly Indexing
+- TLDR of KM's Nightly Indexing
 
-2. What is the problem?
+- What is the problem?
 
-3. Quick 101 to Java Memory Model
+- Quick 101 to Java Memory Model
 
-4. Quick 101 to Java Garbage Collection
+- Quick 101 to Java Garbage Collection
 
-5. Attempts made and their results
+- Attempts made and their results
 
-6. Deeper dive into codes
+- What's Next
 
-7. Challenges
-
-8. Learnings (General Principles)
+- Learnings
 ---
 # KM's Nightly Indexing
 ## When does it run?
@@ -47,7 +45,6 @@ class: center, middle
 ## Indexing Monitoring
 - Number of errors from job: `index_data` by checking `count_over_time`
 - Success message logged by checking `absent_over_time`
-
 
 ---
 # The Problem
@@ -78,9 +75,7 @@ Non-heap memory consists of:
   - Purpose: For optimized machine code (store compiled bytecode needed for program's execution)
 - Garbage collector data
   - Purpose: To store its data when performing GC on heap
-
 ---
-
 ## Java Heap Memory
 <p align="center">
   <img src="images/java-heap-memory.png" alt="jvm" width="500"/>
@@ -91,7 +86,6 @@ Non-heap memory consists of:
 -XX:InitialRAMPercentage=80.0 // Initial startup allocated: 16Gi 
 -XX:+MaxRAMPercentage=80.0 // Maximum: 16Gi
 ```
-
 ???
 - Young generation
   - When eden space is filled with objects, minor GC is performed and all survivor spaces are moved to one of the survivor spaces
@@ -107,20 +101,18 @@ Non-heap memory consists of:
     - If is a responsive application, may notice a lot of timeout errors
     - Takes a long time because need to check the whole heap for all live objects
       - Duration depends on GC strategy
-
 ---
 # Garbage Collection (GC)
 - Free-up space by removing dead/unused objects
 1. **Marking**: Identifies which objects are in use and not in use
 2. **Normal deletion**: GC removes unused objects and reclaim the free space
 3. **Deletion with compacting**: After deletion, all the survived objects can be moved closer together
-
---- 
+---
 ## When does GC occur?
 - Either collected or old enough for promotion, defined by </br> `-XX:MaxTenuringThreshold` (defaults to 15)
   - **Objects that cannot be reached via the GC roots = Unreachable = Removed during GC**
 <p align="center">
-  <img src="images/gc-roots.png" alt="gc-roots" width="600"/>
+  <img src="images/gc-roots.png" alt="gc-roots" width="400"/>
 </p>
 
 <em style="color: grey">
@@ -130,7 +122,6 @@ Non-heap memory consists of:
 - Static variables and constants
 - JNI references
 </em>
-
 ???
 - `-XX:MaxTenuringThreshold` specifies for how many minor GC cycles an object will stay in the survivor spaces until it finally gets tenured into the old space
 - GC is most commonly triggered when memory allocation is requested but not enough free memory on hand
@@ -224,7 +215,7 @@ Based on configuration, no long-lived objects
 ---
 # Memory leak
 ## Troubleshooting methdology
-1. Do I have a leak?
+1. Is there a leak?
 2. What is leaking? (which classes)
 3. What is keeping objects alive?
 4. Where is it leaking from? (code where objects are created and/or assigned)
@@ -258,7 +249,7 @@ Based on configuration, no long-lived objects
   - When a class's `finalize()` is overriden and objects are not instantly GC-ed thus queued for later stage
 
 ---
-# Could there possibly be a memory leak?
+# Memory leak
 <!-- TODO: Insert some gc logs and annotate with JVM memory usage graph -->
 
 ## Conclusion
@@ -280,10 +271,10 @@ class: center, middle
 ---
 ## What it means
 - We would expect these cases:
-  - `Drop in young gen memory usage = Overall drop in JVM heap usage`
-    - This means objects in young generation can be collected and removed
-  - `Drop in young gen = Increase in old gen`
-    - This means that objects survived the minor GCs and are moved to Old gen when passed `MaxTenuringThreshold` age
+  - <span style="color: blue">Drop in young gen memory usage = Overall drop in JVM heap usage</span>
+      - This means objects in young generation can be collected and removed
+  - <span style="color: blue">Drop in young gen = Increase in old gen</span>
+      - This means that objects survived the minor GCs and are moved to Old gen when passed `MaxTenuringThreshold` age
 
 ## Ideal case
 - Old generation should stay flat under normal circumstances, otherwise it would suggest:
@@ -351,7 +342,7 @@ class: center, middle
 ### Did it help?
 - Yes, we see a decrease in Old gen size (and thus overall heap memory usage)
 - **But we trade-off the time taken to finish because**:
-  - Smaller batch = More database queries = More xxx
+  - Smaller batch = More database queries ++
   <!-- TODO: NOW Write more reasons why smaller batch means longer time needed -->
 - Batch sel means that even with increase in profiles or increase in sel
   - We bound the number of sel 
@@ -380,15 +371,12 @@ class: center, middle
 # Number of Sel created across 5 months
 <!-- TODO: Insert the graph for created sel -->
 
---- 
-
+---
 # What does the stats mean?
 - Expect a growth in sel/te
 - With a cap in sel, a growing number suggest:
   - More loops needed per profile batch
   - Indexing duration will grow together with sel
-
----
 
 ## What is the implication with a growing indexing duration?
 - Would there be a case it eats into the working hours, the pod that is running indexing may face a higher risk of OOM 
@@ -396,32 +384,39 @@ class: center, middle
 <!-- TODO: NOW Read if Solr has concurrency issues -->
 - Less control 
 
---- 
+---
 # Next possible steps for considerations
 ## Tuning of GC
 <p align="center">
   <img src="images/g1gc-cycle.png" alt="g1gc-cycle" width="500"/>
 </p>
 
+???
 - Considerations:
   - Allocation
   - Pause sensitivity
   - Throughput behaviour
   - Object lifetime
-???
 - https://c-guntur.github.io/java-gc/#/3
 
---- 
-
+---
 ### Important GC configuration
+<br/>
+
 | What | What it means | Actions | 
 | --- | --- | --- | 
 | `G1MixedGCCountTarget = 8` | Target number of mixed GC after a marking cycle to collect old regions | Increases will increase the collection set for old regions|
 | `G1MixedGCLiveThresholdPercent = 85` | Occupancy threshold for an old region to be included in a mixed GC cycle | Decreases will increase number of eligible old regions to be included in mixed gc |
-| `G1HeapWastePercent = 5` | Percent of heap that we are willing to waste, i.e when reclaimable percent <span heap waste percentage, mixed GC not initiated| Increases will increase mixed gc from being initiated |
+| `G1HeapWastePercent = 5` | Percent of heap that we are willing to waste, i.e when reclaimable percent < heap waste %, mixed GC not initiated| Increases will increase mixed gc from being initiated |
+---
+### Important GC configuration
+<br/>
+
+| What | What it means | Actions | 
+| --- | --- | --- | 
 | `G1HeapRegionSize = 4194304` | Size of a region = 4.194MB | Increases may prevent humongous objects|
 | `G1PauseIntervalMillis = 200` | Automatically sizes the young generation to meet this pause goal | Increases may result in more objects to be collected (provided they are not live)|
-| `G1UseAdaptiveIHOP` | Automatically determines an optimal IHOP by observing how long marking takes and how much memory allocated in the Old Gen during marking cycles | Overrides with a lower % of `InitiatingHeapOccupancyPercent` will cause marking phase to be done earlier|
+| `G1UseAdaptiveIHOP` | Automatically determines an optimal `IHOP` by observing how long marking takes and how much memory allocated in the Old Gen during marking cycles | Overrides with a lower % of `InitiatingHeapOccupancyPercent` will cause marking phase to be done earlier|
 
 ???
 # Taming GC
@@ -455,7 +450,8 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 
 ---
 # Next possible steps for considerations
-## Reduce object sizes: Flyweight design pattern
+## Flyweight design pattern
+- Goal: To reduce object sizes
 - Details: Optimization pattern that reduces memory usage of lists of data by caching the common state of data (extrinsic state)
 
 <p align="center">
@@ -473,8 +469,8 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 
 ---
 # Next possible steps for considerations
-## Efficient indexing
-### Parallelize indexing with Java
+## Parallelize indexing with Java
+- Goal: Efficient indexing
 - Details: Indexing can be done in parallel as long as we do not override documents by indexing with the same `_id`
 - E.g.: The use of `Parallel Streams`
 <!-- TODO: Consider how to parllelize solr indexing -->
@@ -482,12 +478,16 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 - https://www.geeksforgeeks.org/what-is-java-parallel-streams/
 
 --- 
-## Efficient indexing
-### Batch indexing pipeline
+## Scalable indexing
+- Goal: Able to scale with data growth
+- Possible ways:
+  - Batch indexing pipeline
+  - Merging indexes
 
 ??? 
 - https://bikas-katwal.medium.com/design-a-robust-solr-data-indexing-pipeline-and-solr-cloud-setup-best-practices-7a42955d0599
 - https://blog.maxar.com/tech-and-tradecraft/2021/scalable-and-dynamic-data-pipelines-at-maxar-part-1
+- https://solr.apache.org/guide/6_6/introduction-to-scaling-and-distribution.html
 
 --- 
 # Challenges
@@ -502,9 +502,9 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 ---
 # Good practices
 ## Check what is the default for JVM flag values
-- Print final defaults for the JVM with overrides on the defaults
+- Print final defaults for the JVM with overrides on the defaults: <br/>
 `java -XX:+PrintFlagsFinal -version`
-- Print current flags
+- Print current flags: <br/>
 `java -XX:+PrintCommandLineFlags -version`
 
 ## Log GC processes
@@ -534,9 +534,11 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 - GC logging
 - Memory profilers
   - CLI: `jcmd`, `jmap`, `jstat`
+  <!-- TODO: Add sample of `jmap-histo` to see the number of bytes allocated per type and number of instances that are responsible for that memory usage--> 
   - GUI: `jConsole`, `VisualVM`, Mission Control, Java Flight Recorder (JFR)
 - Heap dumps
 
+---
 ### Metrics to monitor
 - How often GC is happening in the JVM
 - How much memory is being collected each time
@@ -552,7 +554,6 @@ https://krzysztofslusarski.github.io/2020/11/10/humongous.html
 - Can also visualize code profiling data.
   - A code profiler analyzes how much time the application code spent on GC, CPU utilization, memory allocation, locks, input/output operations, and other tasks
 ---
-# Extra
 ## General principles - Use less memory
 Using memory more efficiently: use less heap memory → fewer GC cycles
 
